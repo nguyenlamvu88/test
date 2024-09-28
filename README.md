@@ -3,7 +3,7 @@ Vu Nguyen - USC ID: 2120314402
 
 ## Introduction
 
-This project involves classifying human activities based on time series data obtained from a Wireless Sensor Network. The dataset used for this project is the AReM dataset, which contains multiple instances of human activities, each recorded as a time series of sensor data.
+This homework involves classifying human activities based on time series data obtained from a Wireless Sensor Network. The dataset used for this project is the AReM dataset, which contains multiple instances of human activities, each recorded as a time series of sensor data.
 
 ## Dataset Description
 
@@ -113,6 +113,7 @@ These features were chosen as they collectively provide a balanced view of the c
 ├── notebook
 │   ├── Nguyen_Vu_HW3
 └── README.md
+└── requirements.txt
 ```
 
 - **data/**: Contains the original dataset structured in folders representing different activities.
@@ -122,6 +123,6 @@ These features were chosen as they collectively provide a balanced view of the c
 
 ## Conclusion
 
-This project extracted meaningful time-domain features from the AReM dataset and conducted a statistical analysis to understand the variability and reliability of these features. The selected features can be used for building classification models to accurately predict human activities based on time series data from a wireless sensor network.
+This homework extracted meaningful time-domain features from the AReM dataset and conducted a statistical analysis to understand the variability and reliability of these features. The selected features can be used for building classification models to accurately predict human activities based on time series data from a wireless sensor network.
 
 
