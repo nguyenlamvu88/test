@@ -1,4 +1,5 @@
 # Time Series Classification - Feature Creation and Extraction
+Vu Nguyen - USC ID: 2120314402
 
 ## Introduction
 
@@ -87,6 +88,17 @@ After evaluating the statistical properties of each feature, three key time-doma
 
 These features were chosen as they collectively provide a balanced view of the central tendency, variability, and extremes of the time series data, which are critical for distinguishing between different human activities.
 
+## Project Structure
+. ├── data │ ├── bending1 │ │ ├── train │ │ │ ├── dataset1.csv │ │ │ └── ... │ │ ├── test │ │ │ ├── dataset2.csv │ │ │ └── ... │ ├── bending2 │ │ ├── train │ │ ├── test │ └── ... ├── split_dataset │ ├── bending1 │ │ ├── train │ │ ├── test │ ├── bending2 │ │ ├── train │ │ ├── test │ └── ... ├── scripts │ ├── extract_features.py │ ├── organize_datasets.py │ └── ... └──
+
+
+- **data/**: Contains the original dataset structured in folders representing different activities.
+- **split_dataset/**: Contains copies of the original dataset split into `train` and `test` subfolders for each activity.
+- **scripts/**: Python scripts for feature extraction and dataset organization.
+- **README.md**: Documentation for the project.
+
 ## Conclusion
 
-This project extracted meaningful time-domain features from the AReM dataset and conducted a statistical analysis to understand the variability and reliability of these features. The selected
+This project extracted meaningful time-domain features from the AReM dataset and conducted a statistical analysis to understand the variability and reliability of these features. The selected features can be used for building classification models to accurately predict human activities based on time series data from a wireless sensor network.
+
+
