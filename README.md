@@ -90,7 +90,7 @@ These features were chosen as they collectively provide a balanced view of the c
 
 ## Project Structure
 
-├── data
+. ├── data
 │   ├── bending1
 │   │   ├── train
 │   │   │   ├── dataset1.csv
