@@ -89,8 +89,31 @@ After evaluating the statistical properties of each feature, three key time-doma
 These features were chosen as they collectively provide a balanced view of the central tendency, variability, and extremes of the time series data, which are critical for distinguishing between different human activities.
 
 ## Project Structure
-. ├── data │ ├── bending1 │ │ ├── train │ │ │ ├── dataset1.csv │ │ │ └── ... │ │ ├── test │ │ │ ├── dataset2.csv │ │ │ └── ... │ ├── bending2 │ │ ├── train │ │ ├── test │ └── ... ├── split_dataset │ ├── bending1 │ │ ├── train │ │ ├── test │ ├── bending2 │ │ ├── train │ │ ├── test │ └── ... ├── scripts │ ├── extract_features.py │ ├── organize_datasets.py │ └── ... └──
-
+.
+├── data
+│   ├── bending1
+│   │   ├── train
+│   │   │   ├── dataset1.csv
+│   │   │   └── ...
+│   │   ├── test
+│   │   │   ├── dataset2.csv
+│   │   │   └── ...
+│   ├── bending2
+│   │   ├── train
+│   │   ├── test
+│   └── ...
+├── split_dataset
+│   ├── bending1
+│   │   ├── train
+│   │   ├── test
+│   ├── bending2
+│   │   ├── train
+│   │   ├── test
+│   └── ...
+├── notebook
+│   ├── Nguyen_Vu_HW3
+└── README.md
+└── requirements.txt
 
 - **data/**: Contains the original dataset structured in folders representing different activities.
 - **split_dataset/**: Contains copies of the original dataset split into `train` and `test` subfolders for each activity.
