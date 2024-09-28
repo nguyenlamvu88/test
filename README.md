@@ -89,7 +89,7 @@ After evaluating the statistical properties of each feature, three key time-doma
 These features were chosen as they collectively provide a balanced view of the central tendency, variability, and extremes of the time series data, which are critical for distinguishing between different human activities.
 
 ## Project Structure
-.
+
 ├── data
 │   ├── bending1
 │   │   ├── train
@@ -110,10 +110,8 @@ These features were chosen as they collectively provide a balanced view of the c
 │   │   ├── train
 │   │   ├── test
 │   └── ...
-├── scripts
-│   ├── extract_features.py
-│   ├── organize_datasets.py
-│   └── ...
+├── notebook
+│   ├── Nguyen_Vu_HW3
 └── README.md
 
 
