@@ -110,10 +110,12 @@ These features were chosen as they collectively provide a balanced view of the c
 │   │   ├── train
 │   │   ├── test
 │   └── ...
-├── notebook
-│   ├── Nguyen_Vu_HW3
+├── scripts
+│   ├── extract_features.py
+│   ├── organize_datasets.py
+│   └── ...
 └── README.md
-└── requirements.txt
+
 
 - **data/**: Contains the original dataset structured in folders representing different activities.
 - **split_dataset/**: Contains copies of the original dataset split into `train` and `test` subfolders for each activity.
