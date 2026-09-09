@@ -100,7 +100,10 @@ with tabs[0]:
         with left:
             st.markdown("#### Pipeline activity")
             runs = read("SELECT id,run_type,status,rows_written,started_at,finished_at,error_message FROM pipeline_runs ORDER BY started_at DESC LIMIT 12")
-            st.dataframe(runs, width="stretch", hide_index=True) if not runs.empty else st.info("No pipeline run recorded yet.")
+            if runs.empty:
+                st.info("No pipeline run recorded yet.")
+            else:
+                st.dataframe(runs, width="stretch", hide_index=True)
         with right:
             st.markdown("#### Validation gate")
             latest = read("SELECT id,status,holdout_year,started_at,finished_at FROM validation_runs ORDER BY started_at DESC LIMIT 1")
