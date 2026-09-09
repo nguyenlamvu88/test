@@ -91,9 +91,9 @@ tabs = st.tabs(["Control Center", "Historical Data", "Signals & Outcomes", "Vali
 with tabs[0]:
     st.subheader("Research control center")
     if db_required():
-        overview = read("""SELECT (SELECT count(*) FROM securities) securities,(SELECT count(*) FROM market_bars) market_bars,(SELECT count(*) FROM social_posts) social_posts,(SELECT count(*) FROM social_mentions) social_mentions,(SELECT count(*) FROM outcome_labels WHERE label_version=%s) label_rows,(SELECT max(session_date) FROM market_bars) latest_market_date,(SELECT max(created_at) FROM social_posts) latest_social_time""", (LABEL_VERSION,)).iloc[0]
+        overview = read("""SELECT (SELECT count(DISTINCT ticker) FROM market_bars) market_securities,(SELECT count(*) FROM market_bars) market_bars,(SELECT count(*) FROM social_posts) social_posts,(SELECT count(*) FROM social_mentions) social_mentions,(SELECT count(*) FROM outcome_labels WHERE label_version=%s) label_rows,(SELECT max(session_date) FROM market_bars) latest_market_date,(SELECT max(created_at) FROM social_posts) latest_social_time""", (LABEL_VERSION,)).iloc[0]
         cols = st.columns(5)
-        for col, label, key in zip(cols, ["Securities", "Market bars", "Reddit posts", "Ticker mentions", "Labeled states"], ["securities", "market_bars", "social_posts", "social_mentions", "label_rows"]):
+        for col, label, key in zip(cols, ["Market securities", "Market bars", "Reddit posts", "Ticker mentions", "Labeled states"], ["market_securities", "market_bars", "social_posts", "social_mentions", "label_rows"]):
             col.metric(label, fmt_int(overview[key]))
         st.caption(f"Market through {overview['latest_market_date'] or '—'} · Social through {overview['latest_social_time'] or '—'} · Feature {FEATURE_VERSION} · Label {LABEL_VERSION}")
         left, right = st.columns([1.4, 1])
@@ -161,7 +161,10 @@ with tabs[1]:
 with tabs[2]:
     st.subheader("Signals and outcomes")
     if db_required():
-        tickers = read("SELECT ticker FROM securities ORDER BY ticker")["ticker"].tolist()
+        tickers = read(
+            "SELECT DISTINCT ticker FROM outcome_labels WHERE label_version=%s ORDER BY ticker",
+            (LABEL_VERSION,),
+        )["ticker"].tolist()
         if not tickers: st.info("Backfill at least one ticker first.")
         else:
             ticker = st.selectbox("Security", tickers); bars = read("SELECT * FROM market_bars WHERE ticker=%s ORDER BY session_date", (ticker,))
