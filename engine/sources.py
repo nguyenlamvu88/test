@@ -39,6 +39,7 @@ def fetch_reddit_history(
     start: date,
     end: date,
     chunk_days: int = 1,
+    allowed_tickers: set[str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Fetch historical posts in small UTC chunks to reduce 100-row truncation."""
     cursor = datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc)
@@ -102,7 +103,7 @@ def fetch_reddit_history(
                     "body": body,
                     "url": raw.get("url"),
                     "score_observed": raw.get("score"),
-                    "tickers": extract_tickers(title, body),
+                    "tickers": extract_tickers(title, body, allowed_tickers),
                 }
             page += 1
             if len(batch) < 100 or latest_created <= page_after:
