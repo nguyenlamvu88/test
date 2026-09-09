@@ -1,9 +1,11 @@
 import unittest
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from unittest.mock import Mock, patch
 
 import pandas as pd
 
 from engine.features import build_daily_features, build_outcome_labels
+from engine.sources import fetch_reddit_history
 from engine.text import extract_tickers, normalize_ticker
 
 
@@ -43,6 +45,25 @@ class FeatureTests(unittest.TestCase):
         mentions = pd.DataFrame({"ticker":["GME"],"created_at":[datetime(2021,1,8,1,tzinfo=timezone.utc)],"author":["u1"],"community":["pennystocks"]})
         features = build_daily_features(bars, mentions)
         self.assertEqual(int(features.iloc[0]["mentions_1d"]), 0)
+
+
+class RedditSourceTests(unittest.TestCase):
+    @patch("engine.sources.requests.get")
+    def test_archive_window_uses_epoch_seconds(self, mock_get):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {"data": []}
+        mock_get.return_value = response
+
+        posts, warnings = fetch_reddit_history(
+            "pennystocks", date(2021, 1, 15), date(2021, 1, 15)
+        )
+
+        self.assertEqual(posts, [])
+        self.assertEqual(warnings, [])
+        params = mock_get.call_args.kwargs["params"]
+        self.assertEqual(params["after"], 1610668800)
+        self.assertEqual(params["before"], 1610755200)
 
 
 if __name__ == "__main__":
