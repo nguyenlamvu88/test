@@ -13,6 +13,12 @@ class TextTests(unittest.TestCase):
     def test_explicit_cashtags(self):
         self.assertEqual(extract_tickers("Watching $GME and $KOSS", "$CEO is noise"), ["GME", "KOSS"])
 
+    def test_bare_mentions_are_limited_to_market_universe(self):
+        self.assertEqual(
+            extract_tickers("GME and AMC are moving", "CEO says KOSS next", {"GME", "KOSS"}),
+            ["GME", "KOSS"],
+        )
+
     def test_normalization(self):
         self.assertEqual(normalize_ticker("$amc"), "AMC")
         self.assertIsNone(normalize_ticker("CEO"))
