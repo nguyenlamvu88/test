@@ -32,8 +32,13 @@ def backfill_reddit(subreddits: list[str], start: date, end: date) -> dict:
     run_id = db.start_run("reddit_backfill", {"subreddits": subreddits, "start": start, "end": end})
     rows, mentions, warnings = 0, 0, []
     try:
+        market_universe = set(
+            db.read_frame("SELECT DISTINCT ticker FROM market_bars")["ticker"].tolist()
+        )
         for subreddit in subreddits:
-            posts, source_warnings = fetch_reddit_history(subreddit, start, end)
+            posts, source_warnings = fetch_reddit_history(
+                subreddit, start, end, allowed_tickers=market_universe
+            )
             post_count, mention_count = db.upsert_social_posts(posts)
             rows += post_count
             mentions += mention_count
