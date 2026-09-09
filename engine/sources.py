@@ -52,8 +52,12 @@ def fetch_reddit_history(
         while page_after < chunk_end and page < 20:
             params = {
                 "subreddit": subreddit,
-                "after": page_after.isoformat(),
-                "before": chunk_end.isoformat(),
+                # Arctic Shift documents epoch seconds and a limited subset of
+                # ISO-8601. Python's ``+00:00`` form is rejected with HTTP 400,
+                # so use the unambiguous epoch representation for both the
+                # initial daily window and subsequent pagination cursors.
+                "after": int(page_after.timestamp()),
+                "before": int(chunk_end.timestamp()),
                 "sort": "asc",
                 "limit": 100,
                 "fields": "id,author,created_utc,subreddit,title,selftext,url,score",
