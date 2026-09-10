@@ -188,12 +188,18 @@ with tabs[1]:
             with st.form("reddit_backfill"):
                 subs = st.text_input("Subreddits", value=", ".join(DEFAULT_SUBREDDITS)); c1, c2 = st.columns(2)
                 rstart = c1.date_input("Start date", date.today() - timedelta(days=7), key="reddit_start"); rend = c2.date_input("End date", date.today(), key="reddit_end")
+                focused = st.checkbox(
+                    "Only posts matching the stored market universe",
+                    value=True,
+                    help="Uses the archive's keyword query, then verifies ticker mentions locally. This supports ranges up to one year and avoids downloading unrelated posts.",
+                )
                 reddit_submit = st.form_submit_button("Backfill Reddit history", type="primary", width="stretch")
             if reddit_submit:
                 communities = [v.strip().replace("r/", "") for v in subs.split(",") if v.strip()]
-                if rstart > rend or (rend - rstart).days > 31: st.error("Use a valid range of 31 days or less in the dashboard; use the CLI for larger runs.")
+                max_days = 366 if focused else 31
+                if rstart > rend or (rend - rstart).days > max_days: st.error(f"Use a valid range of {max_days} days or less in the dashboard; use the CLI for larger runs.")
                 else:
-                    with st.spinner("Reconstructing timestamped Reddit posts..."): result = backfill_reddit(communities, rstart, rend)
+                    with st.spinner("Reconstructing timestamped Reddit posts..."): result = backfill_reddit(communities, rstart, rend, focused=focused)
                     refresh_data(); st.success(f"Run {result['run_id']} persisted {result['posts_written']:,} posts and {result['mentions_written']:,} mentions.")
                     if result["warnings"]:
                         with st.expander(f"{len(result['warnings'])} source warning(s)"):
