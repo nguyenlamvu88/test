@@ -191,12 +191,12 @@ with tabs[1]:
                 focused = st.checkbox(
                     "Only posts matching the stored market universe",
                     value=True,
-                    help="Uses the archive's keyword query, then verifies ticker mentions locally. This supports ranges up to one year and avoids downloading unrelated posts.",
+                    help="Uses one throttled archive query per ticker, verifies mentions locally, and commits progress incrementally. Run one month at a time.",
                 )
                 reddit_submit = st.form_submit_button("Backfill Reddit history", type="primary", width="stretch")
             if reddit_submit:
                 communities = [v.strip().replace("r/", "") for v in subs.split(",") if v.strip()]
-                max_days = 366 if focused else 31
+                max_days = 31
                 if rstart > rend or (rend - rstart).days > max_days: st.error(f"Use a valid range of {max_days} days or less in the dashboard; use the CLI for larger runs.")
                 else:
                     with st.spinner("Reconstructing timestamped Reddit posts..."): result = backfill_reddit(communities, rstart, rend, focused=focused)
