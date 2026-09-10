@@ -97,6 +97,7 @@ def build_outcome_labels(
             future = daily.iloc[index + 1:index + horizon + 1]
             high_returns = pd.to_numeric(future["high"], errors="coerce") / entry - 1
             low_returns = pd.to_numeric(future["low"], errors="coerce") / entry - 1
+            close_returns = pd.to_numeric(future["close"], errors="coerce") / entry - 1
             target_hits = np.flatnonzero(high_returns.to_numpy() >= target)
             adverse_hits = np.flatnonzero(low_returns.to_numpy() <= -adverse)
             target_session = int(target_hits[0] + 1) if len(target_hits) else None
@@ -119,6 +120,9 @@ def build_outcome_labels(
                 "asof_date": pd.Timestamp(daily.loc[index, "session_date"]).date(),
                 "horizon_sessions": horizon,
                 "target_return": target,
+                "forward_return_1d": float(close_returns.iloc[0]),
+                "forward_return_3d": float(close_returns.iloc[min(2, len(close_returns) - 1)]),
+                "forward_return_5d": float(close_returns.iloc[-1]),
                 "forward_mfe": float(high_returns.max()),
                 "forward_mae": float(low_returns.min()),
                 "target_hit_session": target_session,
