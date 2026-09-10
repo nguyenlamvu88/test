@@ -76,6 +76,20 @@ CREATE TABLE IF NOT EXISTS social_mentions (
 CREATE INDEX IF NOT EXISTS social_mentions_ticker_time_idx
     ON social_mentions(ticker, created_at);
 
+CREATE TABLE IF NOT EXISTS research_universe_memberships (
+    universe_version TEXT NOT NULL,
+    ticker TEXT NOT NULL REFERENCES securities(ticker),
+    inclusion_rank INTEGER NOT NULL,
+    inclusion_reason TEXT NOT NULL,
+    reference_date DATE NOT NULL,
+    reference_price DOUBLE PRECISION NOT NULL,
+    reference_dollar_volume DOUBLE PRECISION,
+    social_mentions INTEGER NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (universe_version, ticker),
+    UNIQUE (universe_version, inclusion_rank)
+);
+
 CREATE TABLE IF NOT EXISTS daily_features (
     ticker TEXT NOT NULL REFERENCES securities(ticker),
     asof_date DATE NOT NULL,
@@ -110,6 +124,9 @@ CREATE TABLE IF NOT EXISTS outcome_labels (
     computed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (ticker, asof_date, label_version)
 );
+ALTER TABLE outcome_labels ADD COLUMN IF NOT EXISTS forward_return_1d DOUBLE PRECISION;
+ALTER TABLE outcome_labels ADD COLUMN IF NOT EXISTS forward_return_3d DOUBLE PRECISION;
+ALTER TABLE outcome_labels ADD COLUMN IF NOT EXISTS forward_return_5d DOUBLE PRECISION;
 
 CREATE TABLE IF NOT EXISTS validation_runs (
     id BIGSERIAL PRIMARY KEY,
