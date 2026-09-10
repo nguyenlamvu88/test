@@ -19,14 +19,16 @@ Set `DATABASE_URL`, then run:
 ```bash
 python -m engine.pipeline init-db
 python -m engine.pipeline market --tickers GME,AMC,KOSS --start 2019-01-01 --end 2025-12-31
-python -m engine.pipeline reddit --subreddits pennystocks,Shortsqueeze --start 2021-01-01 --end 2021-01-31
+python -m engine.pipeline reddit --focused --subreddits pennystocks,Shortsqueeze --start 2021-01-01 --end 2021-12-31
 python -m engine.pipeline universe --target-size 30 --candidate-limit 100
 python -m engine.pipeline compute
 python -m engine.pipeline validate --holdout-year 2026
 streamlit run app.py
 ```
 
-Writes are idempotent. The dashboard limits Reddit backfills to 31 days; the CLI supports larger controlled batches.
+Writes are idempotent. Focused Reddit backfills use the stored market universe to query only
+potentially matching posts, verify the ticker text locally, and support one-year dashboard
+windows. Unfiltered archive runs remain capped at 31 days in the dashboard.
 
 ## Research contract
 
