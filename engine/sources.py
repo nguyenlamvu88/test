@@ -40,6 +40,7 @@ def fetch_reddit_history(
     end: date,
     chunk_days: int = 1,
     allowed_tickers: set[str] | None = None,
+    query_tickers: set[str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Fetch historical posts in small UTC chunks to reduce 100-row truncation."""
     cursor = datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc)
@@ -63,6 +64,8 @@ def fetch_reddit_history(
                 "limit": 100,
                 "fields": "id,author,created_utc,subreddit,title,selftext,url,score",
             }
+            if query_tickers:
+                params["query"] = " OR ".join(sorted(query_tickers))
             try:
                 response = requests.get(
                     f"{settings.arctic_base_url}/api/posts/search",
