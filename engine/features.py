@@ -55,6 +55,10 @@ def _daily_social(ticker: str, dates: pd.Series, mentions: pd.DataFrame) -> pd.D
             communities_3d=0, attention_accel=0.0,
         )
     social["created_at"] = pd.to_datetime(social["created_at"], utc=True)
+    social = social.sort_values("created_at").reset_index(drop=True)
+    created = social["created_at"].to_numpy(dtype="datetime64[ns]")
+    authors = social["author"].to_numpy()
+    communities = social["community"].to_numpy()
     market_tz = ZoneInfo("America/New_York")
     rows = []
     for asof in calendar["asof_date"]:
@@ -62,20 +66,22 @@ def _daily_social(ticker: str, dates: pd.Series, mentions: pd.DataFrame) -> pd.D
         # Later posts on the same UTC date are future information and excluded.
         close_local = pd.Timestamp(asof).tz_localize(market_tz) + pd.Timedelta(hours=16)
         cutoff = close_local.tz_convert("UTC")
-        recent = social[
-            (social["created_at"] <= cutoff)
-            & (social["created_at"] > cutoff - pd.Timedelta(hours=72))
-        ]
-        today = recent[recent["created_at"] > cutoff - pd.Timedelta(hours=24)]
-        previous = recent[recent["created_at"] <= cutoff - pd.Timedelta(hours=24)]
-        prior_daily = len(previous) / 2.0
+        cutoff_ns = cutoff.tz_localize(None).to_datetime64()
+        start_ns = (cutoff - pd.Timedelta(hours=72)).tz_localize(None).to_datetime64()
+        split_ns = (cutoff - pd.Timedelta(hours=24)).tz_localize(None).to_datetime64()
+        left = int(np.searchsorted(created, start_ns, side="right"))
+        split = int(np.searchsorted(created, split_ns, side="right"))
+        right = int(np.searchsorted(created, cutoff_ns, side="right"))
+        recent_count = right - left
+        today_count = right - split
+        prior_daily = (split - left) / 2.0
         rows.append({
             "asof_date": asof,
-            "mentions_1d": int(len(today)),
-            "mentions_3d": int(len(recent)),
-            "unique_authors_3d": int(recent["author"].nunique()),
-            "communities_3d": int(recent["community"].nunique()),
-            "attention_accel": float((len(today) + 1) / (prior_daily + 1)),
+            "mentions_1d": today_count,
+            "mentions_3d": recent_count,
+            "unique_authors_3d": int(pd.Series(authors[left:right]).nunique()),
+            "communities_3d": int(pd.Series(communities[left:right]).nunique()),
+            "attention_accel": float((today_count + 1) / (prior_daily + 1)),
         })
     return pd.DataFrame(rows)
 
@@ -87,48 +93,53 @@ def build_outcome_labels(
     adverse: float = 0.20,
 ) -> pd.DataFrame:
     """Label forward outcomes; same-session target/adverse hits remain ambiguous."""
-    rows = []
+    frames = []
     for ticker, group in bars.groupby("ticker", sort=True):
         daily = group.copy().sort_values("session_date").reset_index(drop=True)
-        for index in range(max(0, len(daily) - horizon)):
-            entry = float(daily.loc[index, "close"])
-            if not np.isfinite(entry) or entry <= 0:
-                continue
-            future = daily.iloc[index + 1:index + horizon + 1]
-            high_returns = pd.to_numeric(future["high"], errors="coerce") / entry - 1
-            low_returns = pd.to_numeric(future["low"], errors="coerce") / entry - 1
-            close_returns = pd.to_numeric(future["close"], errors="coerce") / entry - 1
-            target_hits = np.flatnonzero(high_returns.to_numpy() >= target)
-            adverse_hits = np.flatnonzero(low_returns.to_numpy() <= -adverse)
-            target_session = int(target_hits[0] + 1) if len(target_hits) else None
-            adverse_session = int(adverse_hits[0] + 1) if len(adverse_hits) else None
-            ambiguous = bool(
-                target_session is not None
-                and adverse_session is not None
-                and target_session == adverse_session
-            )
-            if target_session is None:
-                outcome = "non_runner"
-            elif adverse_session is None or target_session < adverse_session:
-                outcome = "clean_50"
-            else:
-                outcome = "wild_50"
-            if ambiguous:
-                outcome = "ambiguous_50"
-            rows.append({
-                "ticker": ticker,
-                "asof_date": pd.Timestamp(daily.loc[index, "session_date"]).date(),
-                "horizon_sessions": horizon,
-                "target_return": target,
-                "forward_return_1d": float(close_returns.iloc[0]),
-                "forward_return_3d": float(close_returns.iloc[min(2, len(close_returns) - 1)]),
-                "forward_return_5d": float(close_returns.iloc[-1]),
-                "forward_mfe": float(high_returns.max()),
-                "forward_mae": float(low_returns.min()),
-                "target_hit_session": target_session,
-                "adverse_hit_session": adverse_session,
-                "ambiguous_same_session": ambiguous,
-                "outcome_class": outcome,
-                "label_version": LABEL_VERSION,
-            })
-    return pd.DataFrame(rows)
+        row_count = max(0, len(daily) - horizon)
+        if row_count == 0:
+            continue
+        entry = pd.to_numeric(daily["close"], errors="coerce").to_numpy(dtype=float)[:row_count]
+        valid = np.isfinite(entry) & (entry > 0)
+        future_high = np.lib.stride_tricks.sliding_window_view(
+            pd.to_numeric(daily["high"], errors="coerce").to_numpy(dtype=float)[1:], horizon
+        )
+        future_low = np.lib.stride_tricks.sliding_window_view(
+            pd.to_numeric(daily["low"], errors="coerce").to_numpy(dtype=float)[1:], horizon
+        )
+        future_close = np.lib.stride_tricks.sliding_window_view(
+            pd.to_numeric(daily["close"], errors="coerce").to_numpy(dtype=float)[1:], horizon
+        )
+        high_returns = future_high / entry[:, None] - 1
+        low_returns = future_low / entry[:, None] - 1
+        close_returns = future_close / entry[:, None] - 1
+        target_mask = high_returns >= target
+        adverse_mask = low_returns <= -adverse
+        target_any = target_mask.any(axis=1)
+        adverse_any = adverse_mask.any(axis=1)
+        target_session = np.where(target_any, target_mask.argmax(axis=1) + 1, np.nan)
+        adverse_session = np.where(adverse_any, adverse_mask.argmax(axis=1) + 1, np.nan)
+        ambiguous = target_any & adverse_any & (target_session == adverse_session)
+        outcome = np.full(row_count, "non_runner", dtype=object)
+        clean = target_any & (~adverse_any | (target_session < adverse_session))
+        outcome[target_any & ~clean] = "wild_50"
+        outcome[clean] = "clean_50"
+        outcome[ambiguous] = "ambiguous_50"
+        frame = pd.DataFrame({
+            "ticker": ticker,
+            "asof_date": pd.to_datetime(daily["session_date"].iloc[:row_count]).dt.date,
+            "horizon_sessions": horizon,
+            "target_return": target,
+            "forward_return_1d": close_returns[:, 0],
+            "forward_return_3d": close_returns[:, min(2, horizon - 1)],
+            "forward_return_5d": close_returns[:, -1],
+            "forward_mfe": np.nanmax(high_returns, axis=1),
+            "forward_mae": np.nanmin(low_returns, axis=1),
+            "target_hit_session": target_session,
+            "adverse_hit_session": adverse_session,
+            "ambiguous_same_session": ambiguous,
+            "outcome_class": outcome,
+            "label_version": LABEL_VERSION,
+        })
+        frames.append(frame.loc[valid])
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
