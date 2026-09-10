@@ -163,40 +163,41 @@ def compute_research_tables(start: date | None = None, end: date | None = None) 
         )
         feature_rows = [tuple(_sql_value(v) for v in row) for row in features.itertuples(index=False, name=None)]
         label_rows = [tuple(_sql_value(v) for v in row) for row in labels.itertuples(index=False, name=None)]
-        db.execute_many(
-            """
-            INSERT INTO daily_features
-              (ticker,asof_date,close,return_1d,return_5d_lag,rvol_20d,dollar_volume,
-               realized_vol_20d,mentions_1d,mentions_3d,unique_authors_3d,communities_3d,
-               attention_accel,feature_version)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            ON CONFLICT (ticker,asof_date,feature_version) DO UPDATE SET
+        db.bulk_merge(
+            "daily_features",
+            [
+                "ticker", "asof_date", "close", "return_1d", "return_5d_lag",
+                "rvol_20d", "dollar_volume", "realized_vol_20d", "mentions_1d",
+                "mentions_3d", "unique_authors_3d", "communities_3d",
+                "attention_accel", "feature_version",
+            ],
+            feature_rows,
+            """ON CONFLICT (ticker,asof_date,feature_version) DO UPDATE SET
               close=EXCLUDED.close,return_1d=EXCLUDED.return_1d,return_5d_lag=EXCLUDED.return_5d_lag,
               rvol_20d=EXCLUDED.rvol_20d,dollar_volume=EXCLUDED.dollar_volume,
               realized_vol_20d=EXCLUDED.realized_vol_20d,mentions_1d=EXCLUDED.mentions_1d,
               mentions_3d=EXCLUDED.mentions_3d,unique_authors_3d=EXCLUDED.unique_authors_3d,
               communities_3d=EXCLUDED.communities_3d,attention_accel=EXCLUDED.attention_accel,
-              computed_at=now()
-            """,
-            feature_rows,
+              computed_at=now()""",
         )
-        db.execute_many(
-            """
-            INSERT INTO outcome_labels
-              (ticker,asof_date,horizon_sessions,target_return,forward_return_1d,
-               forward_return_3d,forward_return_5d,forward_mfe,forward_mae,
-               target_hit_session,adverse_hit_session,ambiguous_same_session,outcome_class,label_version)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            ON CONFLICT (ticker,asof_date,label_version) DO UPDATE SET
+        db.bulk_merge(
+            "outcome_labels",
+            [
+                "ticker", "asof_date", "horizon_sessions", "target_return",
+                "forward_return_1d", "forward_return_3d", "forward_return_5d",
+                "forward_mfe", "forward_mae", "target_hit_session",
+                "adverse_hit_session", "ambiguous_same_session", "outcome_class",
+                "label_version",
+            ],
+            label_rows,
+            """ON CONFLICT (ticker,asof_date,label_version) DO UPDATE SET
               forward_return_1d=EXCLUDED.forward_return_1d,
               forward_return_3d=EXCLUDED.forward_return_3d,
               forward_return_5d=EXCLUDED.forward_return_5d,
               forward_mfe=EXCLUDED.forward_mfe,forward_mae=EXCLUDED.forward_mae,
               target_hit_session=EXCLUDED.target_hit_session,adverse_hit_session=EXCLUDED.adverse_hit_session,
               ambiguous_same_session=EXCLUDED.ambiguous_same_session,outcome_class=EXCLUDED.outcome_class,
-              computed_at=now()
-            """,
-            label_rows,
+              computed_at=now()""",
         )
         total = len(feature_rows) + len(label_rows)
         db.finish_run(run_id, "completed", total)
