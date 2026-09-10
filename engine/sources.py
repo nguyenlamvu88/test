@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
+from threading import Lock
+import time
 from typing import Any
 
 import pandas as pd
@@ -9,6 +11,30 @@ import yfinance as yf
 
 from .config import settings
 from .text import extract_tickers
+
+
+_ARCHIVE_LOCK = Lock()
+_LAST_ARCHIVE_REQUEST = 0.0
+
+
+def _archive_get(url: str, params: dict[str, Any]) -> requests.Response:
+    """Respect the free archive's request-rate guidance and retry one 429."""
+    global _LAST_ARCHIVE_REQUEST
+    for attempt in range(2):
+        with _ARCHIVE_LOCK:
+            delay = 0.65 - (time.monotonic() - _LAST_ARCHIVE_REQUEST)
+            if delay > 0:
+                time.sleep(delay)
+            response = requests.get(url, params=params, timeout=30)
+            _LAST_ARCHIVE_REQUEST = time.monotonic()
+        if response.status_code != 429 or attempt == 1:
+            return response
+        retry_after = response.headers.get("Retry-After") or response.headers.get("X-RateLimit-Reset") or "2"
+        try:
+            time.sleep(min(15.0, max(1.0, float(retry_after))))
+        except ValueError:
+            time.sleep(2.0)
+    return response
 
 
 def fetch_market_history(ticker: str, start: date, end: date) -> pd.DataFrame:
@@ -67,10 +93,9 @@ def fetch_reddit_history(
             if query_tickers:
                 params["query"] = " OR ".join(sorted(query_tickers))
             try:
-                response = requests.get(
+                response = _archive_get(
                     f"{settings.arctic_base_url}/api/posts/search",
-                    params=params,
-                    timeout=30,
+                    params,
                 )
                 response.raise_for_status()
                 payload = response.json()
