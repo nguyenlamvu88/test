@@ -244,7 +244,7 @@ with tabs[2]:
                     "forward_return_5d": "{:.1%}",
                     "best_5d_excursion": "{:.1%}",
                     "worst_5d_excursion": "{:.1%}",
-                }),
+                }, na_rep="—"),
                 hide_index=True,
                 width="stretch",
             )
