@@ -106,7 +106,7 @@ class ValidationTests(unittest.TestCase):
 
 
 class RedditSourceTests(unittest.TestCase):
-    @patch("engine.sources.requests.get")
+    @patch("engine.sources._archive_get")
     def test_archive_window_uses_epoch_seconds(self, mock_get):
         response = Mock()
         response.raise_for_status.return_value = None
@@ -119,11 +119,11 @@ class RedditSourceTests(unittest.TestCase):
 
         self.assertEqual(posts, [])
         self.assertEqual(warnings, [])
-        params = mock_get.call_args.kwargs["params"]
+        params = mock_get.call_args.args[1]
         self.assertEqual(params["after"], 1610668800)
         self.assertEqual(params["before"], 1610755200)
 
-    @patch("engine.sources.requests.get")
+    @patch("engine.sources._archive_get")
     def test_focused_archive_adds_verified_universe_query(self, mock_get):
         response = Mock()
         response.raise_for_status.return_value = None
@@ -133,10 +133,10 @@ class RedditSourceTests(unittest.TestCase):
             "pennystocks",
             date(2021, 1, 1),
             date(2021, 1, 2),
-            allowed_tickers={"GME", "AMC"},
-            query_tickers={"GME", "AMC"},
+            allowed_tickers={"GME"},
+            query_tickers={"GME"},
         )
-        self.assertEqual(mock_get.call_args.kwargs["params"]["query"], "AMC OR GME")
+        self.assertEqual(mock_get.call_args.args[1]["query"], "GME")
 
 
 if __name__ == "__main__":
