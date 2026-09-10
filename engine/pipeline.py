@@ -37,10 +37,7 @@ def backfill_reddit(subreddits: list[str], start: date, end: date, focused: bool
         market_universe = set(
             db.read_frame("SELECT DISTINCT ticker FROM market_bars")["ticker"].tolist()
         )
-        ticker_batches = [
-            set(sorted(market_universe)[index:index + 4])
-            for index in range(0, len(market_universe), 4)
-        ] if focused else [None]
+        ticker_batches = [{ticker} for ticker in sorted(market_universe)] if focused else [None]
         tasks = [(subreddit, batch) for subreddit in subreddits for batch in ticker_batches]
 
         def fetch(task: tuple[str, set[str] | None]):
@@ -54,7 +51,7 @@ def backfill_reddit(subreddits: list[str], start: date, end: date, focused: bool
                 query_tickers=ticker_batch,
             )
 
-        with ThreadPoolExecutor(max_workers=min(2 if focused else 4, len(tasks) or 1)) as pool:
+        with ThreadPoolExecutor(max_workers=min(1 if focused else 4, len(tasks) or 1)) as pool:
             fetched = list(pool.map(fetch, tasks))
         posts_by_community: dict[str, dict[str, dict]] = {subreddit: {} for subreddit in subreddits}
         for subreddit, (posts, source_warnings) in fetched:
