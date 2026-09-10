@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
 import pandas as pd
@@ -29,17 +30,26 @@ def backfill_market(tickers: list[str], start: date, end: date) -> dict:
         raise
 
 
-def backfill_reddit(subreddits: list[str], start: date, end: date) -> dict:
-    run_id = db.start_run("reddit_backfill", {"subreddits": subreddits, "start": start, "end": end})
+def backfill_reddit(subreddits: list[str], start: date, end: date, focused: bool = False) -> dict:
+    run_id = db.start_run("reddit_backfill", {"subreddits": subreddits, "start": start, "end": end, "focused": focused})
     rows, mentions, warnings = 0, 0, []
     try:
         market_universe = set(
             db.read_frame("SELECT DISTINCT ticker FROM market_bars")["ticker"].tolist()
         )
-        for subreddit in subreddits:
-            posts, source_warnings = fetch_reddit_history(
-                subreddit, start, end, allowed_tickers=market_universe
+        def fetch(subreddit: str):
+            return subreddit, fetch_reddit_history(
+                subreddit,
+                start,
+                end,
+                chunk_days=31 if focused else 1,
+                allowed_tickers=market_universe,
+                query_tickers=market_universe if focused else None,
             )
+
+        with ThreadPoolExecutor(max_workers=min(4, len(subreddits) or 1)) as pool:
+            fetched = list(pool.map(fetch, subreddits))
+        for subreddit, (posts, source_warnings) in fetched:
             post_count, mention_count = db.upsert_social_posts(posts)
             rows += post_count
             mentions += mention_count
@@ -277,6 +287,7 @@ def main() -> None:
     reddit.add_argument("--subreddits", default=",".join(DEFAULT_SUBREDDITS))
     reddit.add_argument("--start", required=True, type=_parse_date)
     reddit.add_argument("--end", required=True, type=_parse_date)
+    reddit.add_argument("--focused", action="store_true", help="Query only posts matching the stored market universe")
     universe = commands.add_parser("universe")
     universe.add_argument("--target-size", type=int, default=30)
     universe.add_argument("--candidate-limit", type=int, default=100)
@@ -292,7 +303,7 @@ def main() -> None:
         tickers = [ticker for value in args.tickers.split(",") if (ticker := normalize_ticker(value))]
         result = backfill_market(tickers, args.start, args.end)
     elif args.command == "reddit":
-        result = backfill_reddit([s.strip().replace("r/", "") for s in args.subreddits.split(",") if s.strip()], args.start, args.end)
+        result = backfill_reddit([s.strip().replace("r/", "") for s in args.subreddits.split(",") if s.strip()], args.start, args.end, args.focused)
     elif args.command == "universe":
         result = build_starter_universe(args.target_size, args.candidate_limit)
     elif args.command == "compute":
