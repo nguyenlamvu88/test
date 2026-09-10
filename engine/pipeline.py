@@ -37,23 +37,34 @@ def backfill_reddit(subreddits: list[str], start: date, end: date, focused: bool
         market_universe = set(
             db.read_frame("SELECT DISTINCT ticker FROM market_bars")["ticker"].tolist()
         )
-        def fetch(subreddit: str):
+        ticker_batches = [
+            set(sorted(market_universe)[index:index + 4])
+            for index in range(0, len(market_universe), 4)
+        ] if focused else [None]
+        tasks = [(subreddit, batch) for subreddit in subreddits for batch in ticker_batches]
+
+        def fetch(task: tuple[str, set[str] | None]):
+            subreddit, ticker_batch = task
             return subreddit, fetch_reddit_history(
                 subreddit,
                 start,
                 end,
-                chunk_days=31 if focused else 1,
+                chunk_days=366 if focused else 1,
                 allowed_tickers=market_universe,
-                query_tickers=market_universe if focused else None,
+                query_tickers=ticker_batch,
             )
 
-        with ThreadPoolExecutor(max_workers=min(4, len(subreddits) or 1)) as pool:
-            fetched = list(pool.map(fetch, subreddits))
+        with ThreadPoolExecutor(max_workers=min(2 if focused else 4, len(tasks) or 1)) as pool:
+            fetched = list(pool.map(fetch, tasks))
+        posts_by_community: dict[str, dict[str, dict]] = {subreddit: {} for subreddit in subreddits}
         for subreddit, (posts, source_warnings) in fetched:
+            posts_by_community[subreddit].update({post["post_id"]: post for post in posts})
+            warnings.extend(source_warnings)
+        for subreddit, keyed_posts in posts_by_community.items():
+            posts = list(keyed_posts.values())
             post_count, mention_count = db.upsert_social_posts(posts)
             rows += post_count
             mentions += mention_count
-            warnings.extend(source_warnings)
         db.finish_run(run_id, "completed_with_warnings" if warnings else "completed", rows)
         return {"run_id": run_id, "posts_written": rows, "mentions_written": mentions, "warnings": warnings}
     except Exception as exc:
