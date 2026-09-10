@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 
 import numpy as np
@@ -11,9 +12,16 @@ import streamlit as st
 from engine import db
 from engine.config import DEFAULT_SUBREDDITS, settings
 from engine.features import FEATURE_VERSION, LABEL_VERSION
-from engine.pipeline import backfill_market, backfill_reddit, compute_research_tables, run_validation
+from engine.pipeline import (
+    backfill_market,
+    backfill_reddit,
+    build_starter_universe,
+    compute_research_tables,
+    run_validation,
+)
 from engine.sources import fetch_market_history, fetch_reddit_history
 from engine.text import normalize_ticker
+from engine.universe import UNIVERSE_VERSION
 from engine.validation import validation_decision
 
 
@@ -123,7 +131,45 @@ with tabs[1]:
     st.subheader("Historical data pipeline")
     st.caption("Idempotent backfills write to Postgres; rerunning a range updates rows instead of duplicating them.")
     if db_required():
-        market_tab, reddit_tab, build_tab = st.tabs(["Market bars", "Reddit archive", "Build research tables"])
+        universe_tab, market_tab, reddit_tab, build_tab = st.tabs(
+            ["Starter universe", "Market bars", "Reddit archive", "Build research tables"]
+        )
+        with universe_tab:
+            st.write(
+                "Freeze a reproducible starter cohort from the most-mentioned symbols in the stored "
+                "Reddit archive. A symbol qualifies only when its price at first mention was $10 or "
+                "less, its prior 20-session median dollar volume was at least $250,000, and at least "
+                "252 daily bars are available. The first successful build is frozen as version v1."
+            )
+            memberships = read(
+                """SELECT inclusion_rank,ticker,reference_date,reference_price,
+                          reference_dollar_volume,social_mentions
+                   FROM research_universe_memberships
+                   WHERE universe_version=%s ORDER BY inclusion_rank""",
+                (UNIVERSE_VERSION,),
+            )
+            if memberships.empty:
+                if st.button("Build and freeze 30-stock starter universe", type="primary", width="stretch"):
+                    with st.spinner("Screening archived mentions and backfilling qualifying market history..."):
+                        result = build_starter_universe()
+                    refresh_data()
+                    st.success(
+                        f"Frozen {result['members']} members after reviewing {result['reviewed']} candidates; "
+                        f"wrote {result['market_rows']:,} market bars."
+                    )
+                    if result["rejections"]:
+                        with st.expander(f"{len(result['rejections'])} rejected candidates"):
+                            st.dataframe(pd.DataFrame(result["rejections"]), hide_index=True, width="stretch")
+            else:
+                st.success(f"{UNIVERSE_VERSION} is frozen with {len(memberships)} members.")
+                st.dataframe(
+                    memberships.style.format({
+                        "reference_price": "${:.2f}",
+                        "reference_dollar_volume": "${:,.0f}",
+                    }),
+                    hide_index=True,
+                    width="stretch",
+                )
         with market_tab:
             with st.form("market_backfill"):
                 tickers_text = st.text_input("Tickers", value="GME, AMC, KOSS", help="Comma-separated; maximum 10 per dashboard run.")
@@ -161,6 +207,48 @@ with tabs[1]:
 with tabs[2]:
     st.subheader("Signals and outcomes")
     if db_required():
+        st.markdown("#### Reddit mentions matched to actual market outcomes")
+        st.caption(
+            "Each row uses the market close available at that session—not an intraday execution price—"
+            "then shows the subsequent closing returns and the best/worst five-session path."
+        )
+        comparison = read(
+            """
+            SELECT f.ticker,f.asof_date,f.close AS price_at_session_close,
+                   f.mentions_1d,f.mentions_3d,f.rvol_20d,
+                   l.forward_return_1d,l.forward_return_3d,l.forward_return_5d,
+                   l.forward_mfe AS best_5d_excursion,l.forward_mae AS worst_5d_excursion,
+                   l.outcome_class
+            FROM daily_features f
+            JOIN outcome_labels l USING (ticker,asof_date)
+            WHERE f.feature_version=%s AND l.label_version=%s AND f.mentions_1d>0
+            ORDER BY f.asof_date DESC,f.mentions_1d DESC
+            LIMIT 1000
+            """,
+            (FEATURE_VERSION, LABEL_VERSION),
+        )
+        if comparison.empty:
+            st.info("No price-matched mention states yet. Build the universe and research tables first.")
+        else:
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Mention states", f"{len(comparison):,}")
+            c2.metric("Matched tickers", f"{comparison['ticker'].nunique():,}")
+            c3.metric("Average 5-day close return", f"{comparison['forward_return_5d'].mean():.1%}")
+            c4.metric("Clean +50% rate", f"{(comparison['outcome_class']=='clean_50').mean():.1%}")
+            st.dataframe(
+                comparison.style.format({
+                    "price_at_session_close": "${:.3f}",
+                    "rvol_20d": "{:.2f}×",
+                    "forward_return_1d": "{:.1%}",
+                    "forward_return_3d": "{:.1%}",
+                    "forward_return_5d": "{:.1%}",
+                    "best_5d_excursion": "{:.1%}",
+                    "worst_5d_excursion": "{:.1%}",
+                }),
+                hide_index=True,
+                width="stretch",
+            )
+        st.markdown("#### Per-security outcome history")
         tickers = read(
             "SELECT DISTINCT ticker FROM outcome_labels WHERE label_version=%s ORDER BY ticker",
             (LABEL_VERSION,),
@@ -199,22 +287,52 @@ with tabs[3]:
 with tabs[4]:
     st.subheader("Live discovery sandbox")
     st.caption("A bounded current snapshot for hypothesis generation, deliberately separate from validated historical results.")
-    c1, c2, c3 = st.columns([2,1,1]); subs_text = c1.text_input("Communities", value=", ".join(DEFAULT_SUBREDDITS), key="live_subs"); lookback = c2.selectbox("Lookback days", [1,3,7], index=0); top_n = c3.selectbox("Market check", [10,15,20], index=0)
+    c1, c2, c3 = st.columns([2,1,1]); subs_text = c1.text_input("Communities", value=", ".join(DEFAULT_SUBREDDITS), key="live_subs"); lookback = c2.selectbox("Lookback days", [1,3,7], index=2); top_n = c3.selectbox("Market check", [10,15,20], index=0)
     if st.button("Scan current attention", width="stretch"):
         end, posts, warnings = date.today(), [], []
-        for subreddit in [v.strip().replace("r/", "") for v in subs_text.split(",") if v.strip()]:
-            batch, source_warnings = fetch_reddit_history(subreddit, end-timedelta(days=int(lookback)), end); posts.extend(batch); warnings.extend(source_warnings)
+        communities = [v.strip().replace("r/", "") for v in subs_text.split(",") if v.strip()]
+        market_universe = set()
+        if db_required():
+            market_universe = set(read("SELECT DISTINCT ticker FROM market_bars")["ticker"].tolist())
+        with st.spinner("Scanning communities and checking the latest market closes..."):
+            with ThreadPoolExecutor(max_workers=min(8, len(communities) or 1)) as executor:
+                futures = {
+                    executor.submit(
+                        fetch_reddit_history,
+                        subreddit,
+                        end-timedelta(days=int(lookback)),
+                        end,
+                        1,
+                        market_universe,
+                    ): subreddit
+                    for subreddit in communities
+                }
+                for future in as_completed(futures):
+                    try:
+                        batch, source_warnings = future.result()
+                        posts.extend(batch); warnings.extend(source_warnings)
+                    except Exception as exc:
+                        warnings.append(f"r/{futures[future]}: {exc}")
         mentions = [{"ticker":t,"post_id":p["post_id"],"author":p.get("author"),"community":p["community"]} for p in posts for t in p["tickers"]]
-        if not mentions: st.info("No cashtag mentions found.")
+        if not mentions:
+            st.info(
+                "No usable ticker mentions were returned for this window. The archive can lag live "
+                "Reddit; try seven days, or use Historical Data for a completed archive window."
+            )
         else:
             attention = pd.DataFrame(mentions).groupby("ticker").agg(mentions=("post_id","nunique"),authors=("author","nunique"),communities=("community","nunique")).reset_index().sort_values(["mentions","authors"],ascending=False).head(int(top_n)); market = []
-            for ticker in attention["ticker"]:
+            def market_snapshot(ticker):
                 history = fetch_market_history(ticker, end-timedelta(days=35), end)
-                if len(history) >= 2:
-                    last = history.iloc[-1]; baseline = pd.to_numeric(history["volume"].iloc[-21:-1],errors="coerce").median(); market.append({"ticker":ticker,"price":float(last["close"]),"return_5d":float(last["close"]/history.iloc[-6]["close"]-1) if len(history)>=6 else np.nan,"rvol":float(last["volume"]/baseline) if baseline and baseline>0 else np.nan})
-                else: market.append({"ticker":ticker,"price":np.nan,"return_5d":np.nan,"rvol":np.nan})
-            snapshot = attention.merge(pd.DataFrame(market), on="ticker", how="left"); snapshot["stage"] = np.select([snapshot["return_5d"].fillna(0)>=.50,snapshot["return_5d"].fillna(0)>=.20],["Late / extended","Acceleration"],default="Early / unconfirmed")
-            st.dataframe(snapshot.style.format({"price":"${:.3f}","return_5d":"{:.1%}","rvol":"{:.2f}×"}), width="stretch", hide_index=True)
+                if len(history) < 2:
+                    return {"ticker":ticker,"latest_market_close":np.nan,"return_5d_before_scan":np.nan,"relative_volume":np.nan}
+                last = history.iloc[-1]; baseline = pd.to_numeric(history["volume"].iloc[-21:-1],errors="coerce").median()
+                return {"ticker":ticker,"latest_market_close":float(last["close"]),"return_5d_before_scan":float(last["close"]/history.iloc[-6]["close"]-1) if len(history)>=6 else np.nan,"relative_volume":float(last["volume"]/baseline) if baseline and baseline>0 else np.nan}
+            with ThreadPoolExecutor(max_workers=min(8, len(attention))) as executor:
+                market = list(executor.map(market_snapshot, attention["ticker"].tolist()))
+            snapshot = attention.merge(pd.DataFrame(market), on="ticker", how="left")
+            snapshot["stage"] = np.select([snapshot["return_5d_before_scan"].fillna(0)>=.50,snapshot["return_5d_before_scan"].fillna(0)>=.20],["Late / extended","Acceleration"],default="Early / unconfirmed")
+            st.caption("Market values are the latest available Yahoo daily close, not a real-time executable quote.")
+            st.dataframe(snapshot.style.format({"latest_market_close":"${:.3f}","return_5d_before_scan":"{:.1%}","relative_volume":"{:.2f}×"}), width="stretch", hide_index=True)
         if warnings:
             with st.expander(f"{len(warnings)} source warning(s)"):
                 for warning in warnings[:100]: st.write(warning)
