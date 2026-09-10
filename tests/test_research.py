@@ -2,12 +2,14 @@ import unittest
 from datetime import date, datetime, timezone
 from unittest.mock import Mock, patch
 
+import numpy as np
 import pandas as pd
 
 from engine.features import build_daily_features, build_outcome_labels
 from engine.sources import fetch_reddit_history
 from engine.text import extract_tickers, normalize_ticker
 from engine.universe import evaluate_candidate
+from engine.validation import MODEL_FEATURES, walk_forward_validate
 
 
 class TextTests(unittest.TestCase):
@@ -83,6 +85,24 @@ class FeatureTests(unittest.TestCase):
         mentions = pd.DataFrame({"ticker":["GME"],"created_at":[datetime(2021,1,8,1,tzinfo=timezone.utc)],"author":["u1"],"community":["pennystocks"]})
         features = build_daily_features(bars, mentions)
         self.assertEqual(int(features.iloc[0]["mentions_1d"]), 0)
+
+
+class ValidationTests(unittest.TestCase):
+    def test_non_finite_market_inputs_are_imputed(self):
+        rows = []
+        feature_columns = sorted({column for columns in MODEL_FEATURES.values() for column in columns})
+        for asof, outcome, marker in [
+            ("2020-01-02", "clean_50", 1.0),
+            ("2020-02-03", "non_runner", 2.0),
+            ("2021-01-04", "clean_50", 3.0),
+            ("2021-02-05", "non_runner", 4.0),
+        ]:
+            row = {column: marker for column in feature_columns}
+            row.update({"asof_date": asof, "outcome_class": outcome})
+            rows.append(row)
+        rows[0]["rvol_20d"] = np.inf
+        metrics = walk_forward_validate(pd.DataFrame(rows), min_train_rows=2, embargo_days=0)
+        self.assertEqual(set(metrics["model_name"]), set(MODEL_FEATURES))
 
 
 class RedditSourceTests(unittest.TestCase):
