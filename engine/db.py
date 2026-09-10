@@ -322,6 +322,35 @@ def execute_many(sql: str, rows: list[tuple[Any, ...]]) -> int:
     return len(rows)
 
 
+def bulk_merge(
+    target_table: str,
+    columns: list[str],
+    rows: list[tuple[Any, ...]],
+    conflict_clause: str,
+) -> int:
+    """COPY rows into a temporary table, then atomically merge into a target."""
+    if not rows:
+        return 0
+    allowed_tables = {"daily_features", "outcome_labels"}
+    if target_table not in allowed_tables:
+        raise ValueError(f"Bulk merge is not allowed for {target_table}")
+    column_sql = ",".join(columns)
+    temp_table = f"bulk_{target_table}"
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"CREATE TEMP TABLE {temp_table} "
+            f"(LIKE {target_table} INCLUDING DEFAULTS) ON COMMIT DROP"
+        )
+        with cur.copy(f"COPY {temp_table} ({column_sql}) FROM STDIN") as copy:
+            for row in rows:
+                copy.write_row(row)
+        cur.execute(
+            f"INSERT INTO {target_table} ({column_sql}) "
+            f"SELECT {column_sql} FROM {temp_table} {conflict_clause}"
+        )
+    return len(rows)
+
+
 def _number(value: Any) -> float | None:
     return None if value is None or pd.isna(value) else float(value)
 
