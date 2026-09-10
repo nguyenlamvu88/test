@@ -33,6 +33,7 @@ class LabelTests(unittest.TestCase):
     def test_clean_target_precedes_adverse(self):
         labels = build_outcome_labels(self.frame([10,16,10,10,10,10],[10,9,7,10,10,10]),horizon=5)
         self.assertEqual(labels.iloc[0]["outcome_class"], "clean_50")
+        self.assertEqual(str(labels["target_hit_session"].dtype), "Int64")
 
     def test_same_bar_is_ambiguous(self):
         labels = build_outcome_labels(self.frame([10,16,10,10,10,10],[10,7,10,10,10,10]),horizon=5)
