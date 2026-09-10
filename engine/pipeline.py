@@ -12,6 +12,7 @@ from .config import DEFAULT_SUBREDDITS, settings
 from .features import FEATURE_VERSION, LABEL_VERSION, build_daily_features, build_outcome_labels
 from .sources import fetch_market_history, fetch_reddit_history
 from .text import normalize_ticker
+from .universe import UNIVERSE_VERSION, evaluate_candidate
 from .validation import validation_decision, walk_forward_validate
 
 
@@ -47,6 +48,95 @@ def backfill_reddit(subreddits: list[str], start: date, end: date) -> dict:
         return {"run_id": run_id, "posts_written": rows, "mentions_written": mentions, "warnings": warnings}
     except Exception as exc:
         db.finish_run(run_id, "failed", rows, str(exc))
+        raise
+
+
+def build_starter_universe(
+    target_size: int = 30,
+    candidate_limit: int = 100,
+    start: date = date(2019, 1, 1),
+    end: date = date(2025, 12, 31),
+) -> dict:
+    """Freeze a reproducible, Reddit-derived low-price/liquid research cohort."""
+    existing = db.read_frame(
+        "SELECT ticker FROM research_universe_memberships WHERE universe_version=%s",
+        (UNIVERSE_VERSION,),
+    )
+    if not existing.empty:
+        return {
+            "universe_version": UNIVERSE_VERSION,
+            "status": "already_frozen",
+            "members": len(existing),
+            "reviewed": 0,
+            "market_rows": 0,
+            "rejections": [],
+        }
+
+    candidates = db.read_frame(
+        """
+        SELECT ticker, count(*)::int social_mentions, min(created_at)::date first_mention
+        FROM social_mentions
+        GROUP BY ticker
+        ORDER BY count(*) DESC, ticker
+        LIMIT %s
+        """,
+        (candidate_limit,),
+    )
+    run_id = db.start_run(
+        "universe_build",
+        {
+            "version": UNIVERSE_VERSION,
+            "target_size": target_size,
+            "candidate_limit": candidate_limit,
+            "price_limit": 10.0,
+            "min_20d_dollar_volume": 250000,
+            "market_start": start,
+            "market_end": end,
+        },
+    )
+    accepted, rejections, market_rows = [], [], 0
+    try:
+        for candidate in candidates.itertuples(index=False):
+            frame = fetch_market_history(candidate.ticker, start, end)
+            result = evaluate_candidate(frame, candidate.first_mention)
+            if not result["eligible"]:
+                rejections.append({"ticker": candidate.ticker, "reason": result["reason"]})
+                continue
+            market_rows += db.upsert_market_bars(candidate.ticker, frame)
+            accepted.append((
+                UNIVERSE_VERSION,
+                candidate.ticker,
+                len(accepted) + 1,
+                result["reason"],
+                result["reference_date"],
+                result["reference_price"],
+                result["reference_dollar_volume"],
+                int(candidate.social_mentions),
+            ))
+            if len(accepted) >= target_size:
+                break
+        db.execute_many(
+            """
+            INSERT INTO research_universe_memberships
+              (universe_version,ticker,inclusion_rank,inclusion_reason,reference_date,
+               reference_price,reference_dollar_volume,social_mentions)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (universe_version,ticker) DO NOTHING
+            """,
+            accepted,
+        )
+        db.finish_run(run_id, "completed", market_rows)
+        return {
+            "run_id": run_id,
+            "universe_version": UNIVERSE_VERSION,
+            "status": "frozen",
+            "members": len(accepted),
+            "reviewed": len(accepted) + len(rejections),
+            "market_rows": market_rows,
+            "rejections": rejections,
+        }
+    except Exception as exc:
+        db.finish_run(run_id, "failed", market_rows, str(exc))
         raise
 
 
@@ -93,10 +183,14 @@ def compute_research_tables(start: date | None = None, end: date | None = None) 
         db.execute_many(
             """
             INSERT INTO outcome_labels
-              (ticker,asof_date,horizon_sessions,target_return,forward_mfe,forward_mae,
+              (ticker,asof_date,horizon_sessions,target_return,forward_return_1d,
+               forward_return_3d,forward_return_5d,forward_mfe,forward_mae,
                target_hit_session,adverse_hit_session,ambiguous_same_session,outcome_class,label_version)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             ON CONFLICT (ticker,asof_date,label_version) DO UPDATE SET
+              forward_return_1d=EXCLUDED.forward_return_1d,
+              forward_return_3d=EXCLUDED.forward_return_3d,
+              forward_return_5d=EXCLUDED.forward_return_5d,
               forward_mfe=EXCLUDED.forward_mfe,forward_mae=EXCLUDED.forward_mae,
               target_hit_session=EXCLUDED.target_hit_session,adverse_hit_session=EXCLUDED.adverse_hit_session,
               ambiguous_same_session=EXCLUDED.ambiguous_same_session,outcome_class=EXCLUDED.outcome_class,
@@ -182,6 +276,9 @@ def main() -> None:
     reddit.add_argument("--subreddits", default=",".join(DEFAULT_SUBREDDITS))
     reddit.add_argument("--start", required=True, type=_parse_date)
     reddit.add_argument("--end", required=True, type=_parse_date)
+    universe = commands.add_parser("universe")
+    universe.add_argument("--target-size", type=int, default=30)
+    universe.add_argument("--candidate-limit", type=int, default=100)
     compute = commands.add_parser("compute")
     compute.add_argument("--start", type=_parse_date)
     compute.add_argument("--end", type=_parse_date)
@@ -195,6 +292,8 @@ def main() -> None:
         result = backfill_market(tickers, args.start, args.end)
     elif args.command == "reddit":
         result = backfill_reddit([s.strip().replace("r/", "") for s in args.subreddits.split(",") if s.strip()], args.start, args.end)
+    elif args.command == "universe":
+        result = build_starter_universe(args.target_size, args.candidate_limit)
     elif args.command == "compute":
         result = compute_research_tables(args.start, args.end)
     else:
