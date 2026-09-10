@@ -41,6 +41,8 @@ def walk_forward_validate(
     data["year"] = data["asof_date"].dt.year
     data["target"] = (data["outcome_class"] == "clean_50").astype(int)
     data = data[data["outcome_class"] != "ambiguous_50"].copy()
+    feature_columns = sorted({column for columns in MODEL_FEATURES.values() for column in columns})
+    data[feature_columns] = data[feature_columns].replace([np.inf, -np.inf], np.nan)
     years = sorted(year for year in data["year"].unique() if year < holdout_year)
     rows = []
     for test_year in years[1:]:
