@@ -7,6 +7,7 @@ import pandas as pd
 from engine.features import build_daily_features, build_outcome_labels
 from engine.sources import fetch_reddit_history
 from engine.text import extract_tickers, normalize_ticker
+from engine.universe import evaluate_candidate
 
 
 class TextTests(unittest.TestCase):
@@ -36,6 +37,36 @@ class LabelTests(unittest.TestCase):
     def test_same_bar_is_ambiguous(self):
         labels = build_outcome_labels(self.frame([10,16,10,10,10,10],[10,7,10,10,10,10]),horizon=5)
         self.assertEqual(labels.iloc[0]["outcome_class"], "ambiguous_50")
+
+    def test_forward_close_returns_are_separate_from_intraday_excursion(self):
+        frame = self.frame([10,12,14,16,15,20],[10,9,9,9,9,9])
+        frame["close"] = [10,11,12,13,14,15]
+        labels = build_outcome_labels(frame,horizon=5)
+        self.assertAlmostEqual(labels.iloc[0]["forward_return_1d"], 0.10)
+        self.assertAlmostEqual(labels.iloc[0]["forward_return_3d"], 0.30)
+        self.assertAlmostEqual(labels.iloc[0]["forward_return_5d"], 0.50)
+
+
+class UniverseTests(unittest.TestCase):
+    def test_candidate_must_be_low_priced_and_liquid_at_first_mention(self):
+        frame = pd.DataFrame({
+            "date": pd.date_range("2019-01-01", periods=300, freq="B"),
+            "close": [4.0] * 300,
+            "volume": [100_000] * 300,
+        })
+        result = evaluate_candidate(frame, date(2020, 2, 24))
+        self.assertTrue(result["eligible"])
+        self.assertEqual(result["reference_price"], 4.0)
+
+    def test_candidate_above_price_limit_is_rejected(self):
+        frame = pd.DataFrame({
+            "date": pd.date_range("2019-01-01", periods=300, freq="B"),
+            "close": [12.0] * 300,
+            "volume": [100_000] * 300,
+        })
+        result = evaluate_candidate(frame, date(2020, 2, 24))
+        self.assertFalse(result["eligible"])
+        self.assertEqual(result["reason"], "reference_price_above_limit")
 
 
 class FeatureTests(unittest.TestCase):
