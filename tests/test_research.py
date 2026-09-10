@@ -123,6 +123,21 @@ class RedditSourceTests(unittest.TestCase):
         self.assertEqual(params["after"], 1610668800)
         self.assertEqual(params["before"], 1610755200)
 
+    @patch("engine.sources.requests.get")
+    def test_focused_archive_adds_verified_universe_query(self, mock_get):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {"data": []}
+        mock_get.return_value = response
+        fetch_reddit_history(
+            "pennystocks",
+            date(2021, 1, 1),
+            date(2021, 1, 2),
+            allowed_tickers={"GME", "AMC"},
+            query_tickers={"GME", "AMC"},
+        )
+        self.assertEqual(mock_get.call_args.kwargs["params"]["query"], "AMC OR GME")
+
 
 if __name__ == "__main__":
     unittest.main()
